@@ -1,0 +1,56 @@
+Представьте, что вы работаете в инвестиционной компании, специализирующейся на волатильных* высокорискованных акциях на рынке США. Для решения используйте таблицы prices и securities.
+Руководитель поставил перед вами задачу найти такую акцию, максимальная цена (high) которой была более 200 долларов, а минимальная (low) — менее 30.
+Инвестиционная компания планирует сделать ставку на рост котировок такой бумаги, поэтому нам нужна не просто волатильная акция, цена которой изменяется в таком широком диапазоне, 
+но и такая бумага, среднее значение дневных отклонений** которой больше 0.
+Отдел риск-менеджмента инвестиционной компании ограничивает инвестиции в компании, которые находятся на рынке менее двух лет (менее 504 торговых дней) и общая сумма торгов по которым ниже
+5 000 000 долларов. То есть нужные нам акции должны находиться на рынке более 504 торговых дней и общая сумма торгов по ним должна быть больше 5 000 000 долларов.
+Найдите бумаги, подходящие под описанные выше условия, основываясь на данных из таблиц prices и securities. 
+В качестве ответа укажите наименование компании, которая имеет наибольшее среднее значение дневных отклонений (при соблюдении ограничений, которые вам дал ваш руководитель и отдел риск-менеджмента).
+
+-- определим для каждой акции изменение цены закрытия относительно предыдущего дня
+with daily_changes as (
+select p.symbol
+, p."date"
+, p."close" - lag(p."close") over(partition by p.symbol order by p."date" asc) as daily_changes
+from prices p
+order by p.symbol asc, p."date" asc
+)
+-- рассчитаем среднее изменение относительно предыдущего дня по каждой акции
+,average_changes as (
+select d.symbol
+,avg(d.daily_changes)  as average_daily_changes
+from daily_changes d
+group by d.symbol
+)
+-- соберем информацию по ценам, добавим информацию о среднем изменении относительно предыдущего дня, рассчитаем нужные показатели для каждой акции
+,price_info as (
+select p.symbol
+,ac.average_daily_changes
+,max(p."high") over (partition by p.symbol) as max_price -- максимальная цена для акции за всё время
+,min(p."low") over (partition by p.symbol) as min_price -- минимальная цена для акции
+,sum(p.volume) over (partition by p.symbol) as sum_volume  -- объём торгов акции
+,count(p."close") over (partition by p.symbol) as trading_days -- количество дней, когда акция торговалась
+,row_number() over (partition by p.symbol) as rn
+from prices p
+inner join average_changes ac
+on p.symbol = ac.symbol
+)
+-- объединим информацию о компаниях с информацией об акциях, отберем подходящую нам по критериям компанию
+select s.symbol
+,s."security"
+,s.adress
+,p.average_daily_changes
+,p.max_price
+,p.min_price
+,p.sum_volume
+,p.trading_days
+from securities s
+inner join price_info p
+on s.symbol = p.symbol
+where p.rn = 1
+and p.max_price > 200
+and p.min_price < 30
+and p.average_daily_changes > 0
+and p.sum_volume > 5000000
+and p.trading_days > 504
+order by p.average_daily_changes desc
